@@ -16,13 +16,17 @@
 #    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 import socket
+import threading
 
 HOST = ''
 PORT = 6543
 BACKLOG = 5
 BUF_SIZE = 4096
+MAX_THREADS = 50
+
 
 def parseHTTP(d):
+    """  """
     result = { 'comm':None, 'host':None, 'page':None, 'vsn':None }
     ds = d.decode().split('\r\n')
     count = 0
@@ -39,7 +43,12 @@ def parseHTTP(d):
         count += 1
     return result
 
+
 def sendError(e):
+    """
+    Sends the appropriate error response.
+    Currently ONLY errors are returned by this server.
+    """
     if e == 400:
         msg = str(e) + ' ' + 'Bad Request'
     elif e == 404:
@@ -58,16 +67,11 @@ def sendError(e):
     print(head)
     return head
 
-def listenAndServe():
-    s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-    s.bind((HOST,PORT))
-    s.listen(BACKLOG)
-    conn, addr = s.accept()
-    print('Connected by', addr)
-    while True:
-        data = conn.recv(BUF_SIZE)
-        if not data:
-            break
+
+def parseRequest(conn):
+    """  """
+    data = conn.recv(BUF_SIZE)
+    if data:
         req = parseHTTP(data)
         print(req)
         if not req['comm']:
@@ -77,6 +81,20 @@ def listenAndServe():
         elif req['comm'] == 'GET':
             conn.sendall(sendError(404))
     conn.close()
+
+
+def listenAndServe():
+    """ Main HTTP listen & serve loop.  """
+    tpool = threading.BoundedSemaphore(value=MAX_THREADS)
+    s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    s.bind((HOST,PORT))
+    while True:
+        #print("Threads:",threading.active_count())
+        with tpool:
+            s.listen(BACKLOG)
+            conn, addr = s.accept()
+            print('Connected by', addr)
+            parseRequest(conn)
 
 if __name__ == '__main__':
     listenAndServe()

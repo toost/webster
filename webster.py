@@ -21,7 +21,7 @@ import threading
 HOST = ''
 PORT = 6543
 BACKLOG = 5
-BUF_SIZE = 4096
+BUF_SIZE = 500
 MAX_THREADS = 50
 
 
@@ -36,8 +36,8 @@ def parseHTTP(d):
             result['comm'] = a[0]
             result['page'] = a[1]
             result['vsn'] = a[2].rstrip()
-        elif count == 1 and len(a) == 2:
-            result['host'] = a[1].rstrip()
+        elif len(a) == 2:
+            result[a[0].lower()] = a[1].rstrip()
         else:
             break
         count += 1
@@ -56,12 +56,16 @@ def sendError(e):
     else:
         e = 501
         msg = '501 Not Implemented'
-    head = 'HTTP/1.1 ' + msg + '\r\n'
-    html = '<!DOCTYPE HTML><html><head><title>' + msg
-    html += '</title></head><body><h1>'+msg+'</h1></body>'
+    return header(msg,msg,'close')
+
+
+def header(msg,code,conn):
+    head = 'HTTP/1.1 ' + code + '\r\n'
+    html = '<!DOCTYPE HTML><html><head><title>' + code
+    html += '</title></head><body><h1>'+ msg + '</h1></body>'
     html = html.encode()
     head += 'Content-Length: ' + str(len(html))
-    head += '\r\nConnection: close\r\nContent-type: text/html\r\n\r\n'
+    head += '\r\nConnection: ' + conn + '\r\nContent-type: text/html\r\n\r\n'
     head = head.encode()
     head += html
     print(head)
@@ -70,17 +74,37 @@ def sendError(e):
 
 def parseRequest(conn):
     """  """
-    data = conn.recv(BUF_SIZE)
-    if data:
-        req = parseHTTP(data)
-        print(req)
-        if not req['comm']:
-            conn.sendall(sendError(400))
-        elif req['comm'] != 'GET':
-            conn.sendall(sendError(501))
-        elif req['comm'] == 'GET':
-            conn.sendall(sendError(404))
+    while True:
+        data = conn.recv(BUF_SIZE)
+        if data:
+            req = parseHTTP(data)
+            print(req)
+            if not req['comm']:
+                conn.sendall(sendError(400))
+                conn.close()
+                break
+            elif req['comm'] != 'GET':
+                conn.sendall(sendError(501))
+                conn.close()
+                break
+            elif req['comm'] == 'GET':
+                #conn.sendall(sendError(404))
+                msg = 'Hoi! Hoe gaat het,'+req['page']+'?  Gaat, dank je!'
+                conn.sendall(header(msg,'200 OK','keep-alive'))
+        else:
+            break
     conn.close()
+
+
+class MyThread(threading.Thread):
+    def __init__(self,conn):
+        threading.Thread.__init__(self)
+        self.conn = conn
+
+    def run(self):
+        print('Starting thread with conn:',self.conn)
+        parseRequest(self.conn)
+        print('Closing thread with conn:',self.conn)
 
 
 def listenAndServe():
@@ -89,12 +113,13 @@ def listenAndServe():
     s = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     s.bind((HOST,PORT))
     while True:
-        #print("Threads:",threading.active_count())
-        with tpool:
-            s.listen(BACKLOG)
-            conn, addr = s.accept()
-            print('Connected by', addr)
-            parseRequest(conn)
+        print("Threads:",threading.active_count())
+        #with tpool:
+        s.listen(BACKLOG)
+        conn, addr = s.accept()
+        print('Connected by', addr)
+        t = MyThread(conn)
+        t.start()
 
 if __name__ == '__main__':
     listenAndServe()
